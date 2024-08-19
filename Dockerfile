@@ -1,34 +1,30 @@
-# Builder
-FROM --platform=$BUILDPLATFORM node:20-bullseye as builder
+# Stage 1: Build the React app
+FROM node:latest AS build
 
-# Support custom branches of the react-sdk and js-sdk. This also helps us build
-# images of element-web develop.
-ARG USE_CUSTOM_SDKS=false
-ARG REACT_SDK_REPO="https://github.com/matrix-org/matrix-react-sdk.git"
-ARG REACT_SDK_BRANCH="master"
-ARG JS_SDK_REPO="https://github.com/matrix-org/matrix-js-sdk.git"
-ARG JS_SDK_BRANCH="master"
+# Set the working directory inside the container
+RUN wget https://github.com/VENET-TECHNOLOGIES/element-web/archive/refs/tags/v0.1.0.tar.gz
+RUN tar xvf v0.1.0.tar.gz
+RUN mv element-web-0.1.0 app
 
-RUN apt-get update && apt-get install -y git dos2unix
+WORKDIR /app
 
-WORKDIR /src
+RUN yarn install
+RUN yarn build
 
-COPY . /src
-RUN dos2unix /src/scripts/docker-link-repos.sh && bash /src/scripts/docker-link-repos.sh
-RUN yarn --network-timeout=200000 install
+COPY config.json /app/webapp/
+# # Copy the rest of the application files
 
-RUN dos2unix /src/scripts/docker-package.sh /src/scripts/get-version-from-git.sh /src/scripts/normalize-version.sh && bash /src/scripts/docker-package.sh
+# # # Stage 2: Serve the React app with Nginx
+FROM nginx:alpine
 
-# Copy the config now so that we don't create another layer in the app image
-RUN cp /src/config.sample.json /src/webapp/config.json
+# # # Copy the built React app from the previous stage to the Nginx HTML directory
+COPY --from=build /app/webapp /usr/share/nginx/html
 
-# App
-FROM nginx:alpine-slim
+# # # Copy custom Nginx configuration file, if needed (optional)
+# # # COPY nginx.conf /etc/nginx/nginx.conf
 
-COPY --from=builder /src/webapp /app
+# # # Expose port 80 to the outside world
+EXPOSE 80
 
-# Override default nginx config
-COPY /nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf
-
-RUN rm -rf /usr/share/nginx/html \
-  && ln -s /app /usr/share/nginx/html
+# # # Start Nginx server
+CMD ["nginx", "-g", "daemon off;"]
